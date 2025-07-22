@@ -1,5 +1,5 @@
 import React from 'react'
-import { TrendingUp, TrendingDown, Users, Building, DollarSign, MapPin, Globe } from 'lucide-react'
+import { TrendingUp, Users, Building, DollarSign, Globe } from 'lucide-react'
 
 interface DataLegendProps {
   activeOverlays: string[]

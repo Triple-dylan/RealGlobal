@@ -1483,4 +1483,10 @@ export const taxCreditZonesAPI = {
       return []
     }
   }
+}
+
+export const apiClient = {
+  propertyAPI,
+  zoningAPI,
+  economicAPI
 } 

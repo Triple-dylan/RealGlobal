@@ -55,7 +55,7 @@ export interface EconomicData {
   indicator: 'gdp-growth' | 'property-appreciation'
 }
 
-// Filter Types
+// Enhanced Filter Types with Range Support
 export interface FilterState {
   zoning: string[]
   economic: string[]
@@ -64,6 +64,22 @@ export interface FilterState {
   economicOverlayEnabled: boolean
   propertyTypes: string[]
   propertyListingsEnabled: boolean
+  
+  // Enhanced filter ranges
+  priceRange?: { min: number; max: number }
+  capRateRange?: { min: number; max: number }
+  cashFlowRange?: { min: number; max: number }
+  squareFootageRange?: { min: number; max: number }
+  yearBuiltRange?: { min: number; max: number }
+  occupancyRange?: { min: number; max: number }
+  
+  // Additional filters
+  amenities?: string[]
+  riskLevels?: string[]
+  dateFilters?: {
+    listedAfter?: Date
+    listedBefore?: Date
+  }
 }
 
 // AI Report Types
@@ -133,6 +149,7 @@ export interface CommercialProperty {
   state?: string
 }
 
+// Enhanced Feed Item with Portfolio Integration
 export interface FeedItem {
   id: string
   type: 'address' | 'property' | 'analysis' | 'research' | 'report'
@@ -158,6 +175,13 @@ export interface FeedItem {
     capRate?: number
     occupancyRate?: number
     vacancy?: number
+  }
+  // Portfolio-specific fields
+  portfolioStatus?: 'owned' | 'watching' | 'analyzing' | 'target' | 'avoided'
+  investmentMetrics?: {
+    cashFlow?: number
+    totalReturn?: number
+    riskScore?: number
   }
 }
 
@@ -227,4 +251,84 @@ export interface PropertyReport {
   }
   createdAt: Date
   lastModified: Date
-} 
+}
+
+// Chat & AI Types
+export interface ChatMessage {
+  id: string
+  type: 'user' | 'ai' | 'system'
+  content: string
+  timestamp: Date
+  actions?: ChatAction[]
+  data?: any
+}
+
+export interface ChatAction {
+  id: string
+  label: string
+  icon: React.ReactNode
+  action: () => void
+  variant?: 'primary' | 'secondary' | 'success' | 'warning'
+}
+
+// Portfolio Types (Enhanced)
+export interface PortfolioMetrics {
+  totalValue: number
+  propertyCount: number
+  avgCapRate: number
+  occupancyRate: number
+  monthlyIncome: number
+  totalIncome: number
+  totalExpenses: number
+  netWorth: number
+  diversificationScore: number
+  
+  // Advanced Analytics
+  sharpeRatio: number
+  portfolioBeta: number
+  riskAdjustedReturn: number
+  annualizedReturn: number
+  volatility: number
+  maxDrawdown: number
+  
+  geographicDiversification: {
+    citiesCount: number
+    statesCount: number
+    countriesCount: number
+    herfindahlIndex: number
+  }
+  
+  propertyTypeDiversification: {
+    typesCount: number
+    distributionBalance: number
+  }
+  
+  riskMetrics: {
+    concentrationRisk: number
+    liquidityRisk: number
+    marketRisk: number
+    overallRiskScore: number
+  }
+}
+
+// Market Context Types
+export interface MarketContext {
+  interestRates: {
+    federalFunds: number
+    treasury10Year: number
+    mortgage30Year: number
+  }
+  marketSentiment: {
+    score: number
+    description: string
+  }
+  economicIndicators: {
+    gdpGrowth: number
+    unemployment: number
+    inflation: number
+  }
+  constructionCosts: {
+    index: number
+    changeYoY: number
+  }
+}

@@ -127,18 +127,12 @@ class EconomicDataService {
   private async fetchFromOECD(): Promise<CountryEconomicData> {
     const data: CountryEconomicData = {}
     
+    // DISABLED: OECD API calls cause CORS errors in browser
+    // TODO: Implement server-side proxy for OECD data
     try {
-      // OECD has free APIs for economic indicators
-      // Example: GDP growth rate for OECD countries
-      const response = await fetch(
-        'https://stats.oecd.org/restsdmx/sdmx.ashx/GetData/QNA/AUS+AUT+BEL+CAN+CHL+COL+CZE+DNK+EST+FIN+FRA+DEU+GRC+HUN+ISL+IRL+ISR+ITA+JPN+KOR+LVA+LTU+LUX+MEX+NLD+NZL+NOR+POL+PRT+SVK+SVN+ESP+SWE+CHE+TUR+GBR+USA.B1_GE.VOBARSA.Q/all?format=json'
-      )
-      
-      if (response.ok) {
-        const result = await response.json()
-        // Parse OECD data structure (complex SDMX format)
-        // This would require more detailed parsing
-      }
+      // OECD has free APIs for economic indicators but requires server-side proxy
+      // Temporarily disabled to prevent CORS errors
+      console.log('OECD API call disabled to prevent CORS errors')
     } catch (error) {
       console.warn('OECD API fetch failed:', error)
     }

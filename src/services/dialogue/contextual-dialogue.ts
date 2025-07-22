@@ -241,3 +241,5 @@ Respond naturally and professionally, offering specific actions when appropriate
     this.currentContext = null
   }
 }
+
+export const contextualDialogueService = new ContextualDialogueService()

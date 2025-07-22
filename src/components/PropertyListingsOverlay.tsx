@@ -34,6 +34,10 @@ const PropertyListingsOverlay: React.FC<PropertyListingsOverlayProps> = ({
 
     const fetchProperties = async () => {
       const bounds = map.getBounds()
+      if (!bounds) {
+        console.warn('Map bounds not available')
+        return
+      }
       const boundsString = JSON.stringify(bounds)
       
       // Don't refetch if bounds haven't changed significantly

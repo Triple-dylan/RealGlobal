@@ -40,6 +40,10 @@ const EnhancedPropertyListingsOverlay: React.FC<EnhancedPropertyListingsOverlayP
 
       try {
         const bounds = map.getBounds()
+        if (!bounds) {
+          console.warn('Map bounds not available')
+          return
+        }
         
         // Build search filters
         const filters: PropertySearchFilters = {
@@ -54,6 +58,10 @@ const EnhancedPropertyListingsOverlay: React.FC<EnhancedPropertyListingsOverlayP
           propertyType: {
             types: propertyTypes
           },
+          physical: {},
+          market: {},
+          financial: {},
+          investment: {},
           ...searchFilters // Merge in any additional filters
         }
 
@@ -71,6 +79,10 @@ const EnhancedPropertyListingsOverlay: React.FC<EnhancedPropertyListingsOverlayP
         // Try fallback API call
         try {
           const bounds = map.getBounds()
+          if (!bounds) {
+            console.warn('Map bounds not available for fallback')
+            return
+          }
           const fallbackProperties = await commercialAPI.searchProperties({
             bounds: {
               north: bounds.getNorth(),
@@ -339,9 +351,10 @@ const EnhancedPropertyListingsOverlay: React.FC<EnhancedPropertyListingsOverlayP
         .filter(Boolean) as CommercialProperty[]
 
       if (onClusterClick && clusterProperties.length > 0) {
-        const center = features[0].geometry.type === 'Point' 
-          ? features[0].geometry.coordinates as [number, number]
+        const coordinates = features[0].geometry.type === 'Point' 
+          ? features[0].geometry.coordinates
           : [0, 0]
+        const center: [number, number] = [coordinates[0], coordinates[1]]
         onClusterClick(clusterProperties, center)
       }
     })

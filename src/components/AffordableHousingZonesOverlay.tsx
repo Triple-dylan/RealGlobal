@@ -51,6 +51,10 @@ const AffordableHousingZonesOverlay: React.FC<AffordableHousingZonesOverlayProps
         
         // Get current map bounds to limit data fetch
         const bounds = map.getBounds()
+        if (!bounds) {
+          console.log('[AffordableHousingZonesOverlay] No bounds available')
+          return
+        }
         const boundsObj = {
           north: bounds.getNorth(),
           south: bounds.getSouth(), 

@@ -1,34 +1,40 @@
 import { useRef, useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import { FilterState, PropertyType } from '../types'
+import { FilterState } from '../types'
 import { PropertyListing } from '../services/propertyData'
 import OpportunityZonesOverlay from './OpportunityZonesOverlay'
-import AffordableHousingZonesOverlay from './AffordableHousingZonesOverlay'
 import EconomicOverlay from './EconomicOverlay'
-import PropertyListingsOverlay from './PropertyListingsOverlay'
+// Removed unused PropertyListingsOverlay
 import CommercialZonesOverlay from './overlays/CommercialZonesOverlay'
 import MultifamilyZonesOverlay from './overlays/MultifamilyZonesOverlay'
 import EnhancedPropertyListingsOverlay from './overlays/EnhancedPropertyListingsOverlay'
+import { animationClasses, useAnimations } from './AnimationCSS'
 
 interface MapboxGlobeProps {
   filters: FilterState
   onReady?: () => void
   onPropertyClick?: (property: PropertyListing) => void
   onZoneClick?: (zone: any) => void
+  onMapRightClick?: (coordinates: { lat: number; lng: number }, address: string) => void
 }
 
 // Set Mapbox access token - this would come from environment variables in production
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || 'pk.eyJ1IjoiZHlsYW5kYWhsIiwiYSI6ImNtY2NlMTByODAwZmoyaW9qMjRsbGR1MnAifQ.IZKpxXXap93-osoqR3YsAQ'
-// Use provided Mapbox style URL
-const MAPBOX_STYLE_URL = 'mapbox://styles/dylandahl/cmcl05lb8002k01sqc22u66wy'
+
+// Use the user's custom Mapbox style for globe projection
+const MAPBOX_STYLE_URL = 'mapbox://styles/dylandahl/cmcfaemjf01zf01r7bimd68uq'
+const FALLBACK_STYLE = 'mapbox://styles/mapbox/satellite-v9'
 
 const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
-  const { filters, onReady, onPropertyClick, onZoneClick } = props
+  const { filters, onReady, onPropertyClick, onZoneClick, onMapRightClick } = props
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
   const [isReady, setIsReady] = useState(false)
+
+  // Initialize animations
+  useAnimations()
 
   useImperativeHandle(ref, () => ({
     map: mapRef.current,
@@ -80,7 +86,7 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
       }
       
       try {
-        // Create Mapbox GL map with transparent canvas
+        // Create Mapbox GL map with proper globe projection and satellite style
         const map = new mapboxgl.Map({
           container: container,
           style: MAPBOX_STYLE_URL,
@@ -100,7 +106,6 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
           maxPitch: 85,
           maxZoom: 20,
           minZoom: 0.5,
-          // CRITICAL: This should force transparent canvas
           preserveDrawingBuffer: true,
           antialias: true
         })
@@ -108,17 +113,15 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
         mapRef.current = map
         
         map.on('load', () => {
-          // CRITICAL: Force canvas transparency immediately
-          const canvas = map.getCanvas()
-          const ctx = canvas.getContext('webgl') || canvas.getContext('webgl2')
-          if (ctx) {
-            // Clear to transparent
-            ctx.clearColor(0, 0, 0, 0)
-            ctx.clear(ctx.COLOR_BUFFER_BIT)
-          }
+          console.log('Mapbox map loaded successfully')
+          console.log('Map projection:', map.getProjection())
+          console.log('Map style:', map.getStyle())
           
-          // NO FOG - this creates the white background
-          // Disable fog completely
+          // Ensure the globe projection is properly set
+          if (map.getProjection().name !== 'globe') {
+            console.log('Setting globe projection...')
+            map.setProjection({ name: 'globe' } as any)
+          }
           
           setIsReady(true)
           setMapError(null)
@@ -128,18 +131,50 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
         })
 
         map.on('style.load', () => {
+          console.log('Mapbox style loaded')
+          console.log('Style URL:', map.getStyle().sprite)
           setIsReady(true)
         })
 
         map.on('idle', () => {
+          console.log('Map is idle')
           if (!isReady) {
             setIsReady(true)
+          }
+        })
+
+        // Add right-click handler for property addition
+        map.on('contextmenu', async (e) => {
+          if (onMapRightClick) {
+            const { lng, lat } = e.lngLat
+            
+            // Reverse geocode to get address
+            try {
+              const response = await fetch(
+                `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxgl.accessToken}`
+              )
+              const data = await response.json()
+              const address = data.features[0]?.place_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+              
+              onMapRightClick({ lat, lng }, address)
+            } catch (error) {
+              console.error('Error reverse geocoding:', error)
+              onMapRightClick({ lat, lng }, `${lat.toFixed(4)}, ${lng.toFixed(4)}`)
+            }
           }
         })
         
         map.on('error', (e) => {
           console.error('Mapbox error:', e)
-          setMapError('Map loading error')
+          console.error('Error details:', e.error)
+          
+          // Try fallback style if satellite style fails
+          if (e.error && e.error.message && e.error.message.includes('style')) {
+            console.log('Trying fallback style...')
+            map.setStyle(FALLBACK_STYLE)
+          } else {
+            setMapError('Map loading error: ' + (e.error?.message || 'Unknown error'))
+          }
         })
         
       } catch (err: any) {
@@ -168,10 +203,19 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
       <div 
         ref={mapContainer} 
         className="map-container"
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          zIndex: 0,
+          backgroundColor: 'transparent'
+        }}
       />
 
       {/* Enhanced Map Controls for Mapbox */}
-      <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-40">
+      <div className={`absolute bottom-4 right-4 flex flex-col gap-1 z-40 ${animationClasses.slideInRight}`}>
         {/* Zoom In */}
         <button
           onClick={() => {
@@ -180,7 +224,7 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
               mapRef.current.easeTo({ zoom: currentZoom + 1, duration: 300 })
             }
           }}
-          className="w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm transition-all duration-200 hover:scale-105 flex items-center justify-center text-sm font-bold"
+          className={`w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm ${animationClasses.ultraSmooth} ${animationClasses.hoverScale} ${animationClasses.buttonPress} ${animationClasses.focusRing} flex items-center justify-center text-sm font-bold`}
           title="Zoom In"
         >
           +
@@ -194,7 +238,7 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
               mapRef.current.easeTo({ zoom: currentZoom - 1, duration: 300 })
             }
           }}
-          className="w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm transition-all duration-200 hover:scale-105 flex items-center justify-center text-sm font-bold"
+          className={`w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm ${animationClasses.ultraSmooth} ${animationClasses.hoverScale} ${animationClasses.buttonPress} ${animationClasses.focusRing} flex items-center justify-center text-sm font-bold`}
           title="Zoom Out"
         >
           −
@@ -213,7 +257,7 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
               })
             }
           }}
-          className="w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm transition-all duration-200 hover:scale-105 flex items-center justify-center"
+          className={`w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm ${animationClasses.ultraSmooth} ${animationClasses.hoverScale} ${animationClasses.buttonPress} ${animationClasses.focusRing} flex items-center justify-center`}
           title="Reset View"
         >
           <svg 
@@ -237,7 +281,7 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
               mapRef.current.setProjection({ name: newProjection } as any)
             }
           }}
-          className="w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm transition-all duration-200 hover:scale-105 flex items-center justify-center text-xs"
+          className={`w-8 h-8 bg-white/90 hover:bg-white shadow-lg text-gray-700 rounded border border-gray-300 backdrop-blur-sm ${animationClasses.ultraSmooth} ${animationClasses.hoverScale} ${animationClasses.buttonPress} ${animationClasses.focusRing} flex items-center justify-center text-xs`}
           title="Toggle Globe/Flat"
         >
           🌍
@@ -256,6 +300,16 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
         .mapboxgl-ctrl {
           display: none !important;
         }
+        
+        /* Ensure Mapbox canvas is visible and properly positioned */
+        .mapboxgl-canvas {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 100% !important;
+          z-index: 0 !important;
+        }
       `}</style>
       
       {mapRef.current && isReady && (
@@ -265,10 +319,7 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
             map={mapRef.current as any} 
             visible={filters.zoning.includes('opportunity-zones')}
           />
-          <AffordableHousingZonesOverlay 
-            map={mapRef.current as any} 
-            visible={filters.zoning.includes('affordable-housing')}
-          />
+
           
           {/* Enhanced commercial-focused overlays */}
           <CommercialZonesOverlay
@@ -313,20 +364,26 @@ const MapboxGlobe = forwardRef<any, MapboxGlobeProps>((props, ref) => {
       {/* Move loading and error overlays below overlays/UI panels, above map */}
       {!isReady && !mapError && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4"></div>
-            <div className="text-white text-lg">Loading Mapbox Globe...</div>
+          <div className={`text-center ${animationClasses.slideUpFade}`}>
+            <div className={`animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400 mx-auto mb-4 ${animationClasses.pulse}`}></div>
+            <div className={`text-white text-lg ${animationClasses.shimmer}`}>Loading Mapbox Globe...</div>
+            <div className="text-white text-sm opacity-75 mt-2">Style: {MAPBOX_STYLE_URL}</div>
           </div>
         </div>
       )}
       {mapError && (
-        <div className="absolute top-4 left-4 z-10 bg-red-900/90 text-white p-4 rounded-lg border border-red-700 max-w-md pointer-events-none">
+        <div className={`absolute top-4 left-4 z-10 bg-red-900/90 text-white p-4 rounded-lg border border-red-700 max-w-md pointer-events-none ${animationClasses.slideDown} ${animationClasses.hoverGlow}`}>
           <div className="text-sm font-medium">Mapbox Configuration Error</div>
           <div className="text-xs opacity-90 mt-1">{mapError}</div>
           <div className="text-xs opacity-75 mt-2">
             To use Mapbox features, configure your access token in environment variables.<br />
             Falling back to MapTiler in the next update...
           </div>
+        </div>
+      )}
+      {isReady && !mapError && (
+        <div className={`absolute top-4 right-4 z-10 bg-green-900/90 text-white p-2 rounded-lg border border-green-700 text-xs pointer-events-none ${animationClasses.slideDown} ${animationClasses.pulse}`}>
+          Mapbox Globe Ready ✓
         </div>
       )}
     </div>

@@ -96,3 +96,5 @@ coverage/
 
 # Ignore public/data-scripts if it contains sensitive data
 public/data-scripts/
+
+data-scripts/tiles/

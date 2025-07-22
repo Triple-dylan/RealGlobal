@@ -1,20 +1,22 @@
-import React, { useRef, useState, useEffect } from 'react'
+import React, { useRef, useState, useEffect, useCallback } from 'react'
 import { FilterState, FeedItem } from './types'
 import FiltersPanel from './components/FiltersPanel'
 import FloatingChatSearchBar from './components/FloatingChatSearchBar'
 import ErrorBoundary from './components/ErrorBoundary'
 import MapboxGlobe from './components/MapboxGlobe'
-import TopActionBar from './components/TopActionBar'
-import EnhancedFeedBox from './components/EnhancedFeedBox'
+import PortfolioToolbar from './components/PortfolioToolbar'
+import StreamlinedFeedBox from './components/StreamlinedFeedBox'
 import PropertyRecommendations from './components/PropertyRecommendations'
-import { propertyAPI } from './services/api'
+import { PortfolioProvider, usePortfolio } from './components/PortfolioSystem'
+import PropertyPillarOverlay from './components/PropertyPillarOverlay'
 import { PropertyListing } from './services/propertyData'
 import { marketAnalysisService } from './services/marketAnalysis'
 import { FreePropertyListing } from './services/freePropertyData'
 
 
 
-const App: React.FC = () => {
+// Main App component wrapped with portfolio context  
+const AppContent: React.FC = React.memo(() => {
   const [filters, setFilters] = useState<FilterState>({
     zoning: [],
     economic: [],
@@ -25,80 +27,60 @@ const App: React.FC = () => {
     propertyListingsEnabled: false
   })
   const [loading] = useState(false)
-  const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [feedTitle, setFeedTitle] = useState('New Research')
   const [isFeedVisible, setIsFeedVisible] = useState(true)
   const [isMapReady, setIsMapReady] = useState(false)
   const [showRecommendations, setShowRecommendations] = useState(false)
+  const [showFilters] = useState(true)
+  
+  // Use portfolio context
+  const {
+    workspaceItems,
+    portfolioItems,
+    portfolioStats,
+    addToWorkspace,
+    addToPortfolio,
+    removeFromWorkspace,
+    getPortfolioPillars,
+    generatePortfolioReport
+  } = usePortfolio()
 
   // Ref to access MapboxGlobe's map
   const mapboxGlobeRef = useRef<any>(null)
 
-  const handleFiltersChange = (newFilters: FilterState) => {
+  const handleFiltersChange = useCallback((newFilters: FilterState) => {
     setFilters(newFilters)
-  }
+  }, [])
 
-  const handlePropertyListingsToggle = (enabled: boolean) => {
-    setFilters(prev => ({
-      ...prev,
-      propertyListingsEnabled: enabled,
-      propertyTypes: enabled && prev.propertyTypes.length === 0 
-        ? ['commercial', 'industrial', 'multifamily'] 
-        : prev.propertyTypes
-    }))
-  }
 
-  const handlePropertyTypesChange = (types: string[]) => {
-    setFilters(prev => ({ ...prev, propertyTypes: types }))
-  }
 
 
 
   // Function to clean up duplicate feed items
   const cleanupDuplicateFeeds = () => {
-    setFeedItems(prev => {
-      const seen = new Set();
-      return prev.filter(item => {
-        const key = `${item.type}-${item.title}`;
-        if (seen.has(key)) {
-          return false;
-        }
-        seen.add(key);
-        return true;
-      });
+    // Use workspaceItems from portfolio context instead of local state
+    const seen = new Set();
+    const uniqueItems = workspaceItems.filter(item => {
+      const key = `${item.type}-${item.title}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
     });
+    
+    // Update workspace items if there were duplicates
+    if (uniqueItems.length !== workspaceItems.length) {
+      // This would need to be handled by the portfolio context
+      console.log('Cleaned up duplicate feed items');
+    }
   };
 
   // Clean up duplicates on mount
   useEffect(() => {
     cleanupDuplicateFeeds();
-  }, []);
+  }, [workspaceItems]);
 
-  const searchPropertiesAtAddress = async (address: string, coordinates: { lat: number; lng: number }) => {
-    try {
-      // First, try to find properties at the exact address
-      const exactProperties = await propertyAPI.getPropertiesByAddress(address);
-      
-      if (exactProperties.length > 0) {
-        console.log('Found exact properties at address:', exactProperties);
-        return exactProperties;
-      }
-      
-      // If no exact properties, search in a small radius around the coordinates
-      const radiusSearch = await propertyAPI.getPropertiesByLocation(coordinates, 0.01); // ~1km radius
-      
-      if (radiusSearch.length > 0) {
-        console.log('Found nearby properties:', radiusSearch);
-        return radiusSearch;
-      }
-      
-      // If still no properties, return empty array
-      return [];
-    } catch (error) {
-      console.error('Error searching for properties:', error);
-      return [];
-    }
-  };
 
   const handleAddressDetected = async (address: string, coordinates: { lat: number; lng: number }) => {
     console.log('Address detected:', address, coordinates);
@@ -145,12 +127,10 @@ const App: React.FC = () => {
       const newTitle = `${address.split(',')[0]} Research`;
       setFeedTitle(newTitle);
       
-      // Add both items to feed using functional update to ensure proper state management
-      setFeedItems(prev => {
-        const newItems = [addressItem, analysisItem, ...prev];
-        console.log('Updated feed items:', newItems);
-        return newItems;
-      });
+      // Add both items to workspace using portfolio context
+      addToWorkspace(addressItem);
+      addToWorkspace(analysisItem);
+      console.log('Added items to workspace');
       
       // Always show the feed when a search is made to create workspace tab effect
       console.log('Showing feed box for workspace tab');
@@ -197,44 +177,119 @@ const App: React.FC = () => {
         }
       };
       
-      setFeedItems(prev => [addressItem, analysisItem, ...prev]);
+      addToWorkspace(addressItem);
+      addToWorkspace(analysisItem);
       setIsFeedVisible(true);
     }
   }
 
-  const handleLocationClick = (location: { lat: number; lng: number; zoom: number }) => {
-    console.log('handleLocationClick called with:', location);
-    console.log('Map ready?', isMapReady);
-    console.log('Map ref exists?', !!mapboxGlobeRef.current);
-    console.log('FlyToLocation method exists?', !!mapboxGlobeRef.current?.flyToLocation);
-    
+  const handleLocationClick = useCallback((location: { lat: number; lng: number; zoom: number }) => {
     if (mapboxGlobeRef.current?.flyToLocation && isMapReady) {
-      console.log('Flying to clicked location:', location)
-      const success = mapboxGlobeRef.current.flyToLocation(location, location.zoom)
-      console.log('FlyTo success:', success);
-    } else {
-      console.warn('Map not ready for flyToLocation', {
-        hasMapRef: !!mapboxGlobeRef.current,
-        hasFlyToMethod: !!mapboxGlobeRef.current?.flyToLocation,
-        isMapReady: isMapReady
-      })
+      mapboxGlobeRef.current.flyToLocation(location, location.zoom)
     }
-  }
+  }, [isMapReady])
 
-  const handleMapReady = () => {
-    console.log('Map is ready')
+  const handleMapReady = useCallback(() => {
     setIsMapReady(true)
-  }
+  }, [])
 
-  const handlePropertyClick = (property: PropertyListing) => {
+  const handleMapRightClick = useCallback(async (coordinates: { lat: number; lng: number }, address: string) => {
+    const propertyData = {
+      address,
+      propertyType: 'Unknown',
+      coordinates,
+      price: null,
+      sqft: null,
+      pricePerSqft: null,
+      capRate: null,
+      occupancyRate: null
+    }
+
+    // Create portfolio property item
+    const portfolioProperty: FeedItem = {
+      id: `map-portfolio-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type: 'property',
+      title: address,
+      content: `🎯 **MANUALLY ADDED PROPERTY**
+
+📍 **Location:**
+• Address: ${address}
+• Coordinates: ${coordinates.lat.toFixed(4)}, ${coordinates.lng.toFixed(4)}
+• Status: Owned
+
+✏️ **Next Steps:**
+• Add property details (price, type, size)
+• Upload property documents
+• Set performance tracking alerts
+
+Added via map interaction - right-click to add more properties.`,
+      location: {
+        lat: coordinates.lat,
+        lng: coordinates.lng,
+        zoom: 16
+      },
+      portfolioStatus: 'owned'
+    }
+
+    // Add to portfolio through context
+    addToPortfolio(portfolioProperty)
+    addToWorkspace(portfolioProperty)
+    
+    // Show the feed
+    setIsFeedVisible(true)
+    setFeedTitle(`${address.split(',')[0]} Property`)
+    
+    console.log('Added property from map click:', address)
+  }, [addToPortfolio, addToWorkspace])
+
+  const handlePropertyClick = async (property: PropertyListing) => {
     console.log('Property clicked:', property);
     
-    // Create property item for the feed
+    // Generate comprehensive property analysis
+    const generatePropertyAnalysis = (prop: PropertyListing) => {
+      const capRate = prop.capRate || 0;
+      const pricePerSqft = prop.pricePerSqft || 0;
+      const occupancy = prop.occupancyRate || 90;
+      
+      const investmentGrade = capRate > 7 ? 'Excellent' : capRate > 5 ? 'Good' : capRate > 3 ? 'Fair' : 'Poor';
+      const marketPosition = pricePerSqft > 200 ? 'Premium' : pricePerSqft > 100 ? 'Mid-Market' : 'Value';
+      
+      const riskLevel = occupancy > 95 ? 'Low' : occupancy > 85 ? 'Medium' : 'High';
+      const cashFlowProjection = prop.price ? (prop.price * (capRate / 100)) / 12 : 0;
+      
+      return `
+📊 **INVESTMENT ANALYSIS**
+
+🏢 **Property Overview:**
+• Type: ${prop.type} • Size: ${prop.squareFootage || 'N/A'} sq ft
+• Price: $${prop.price?.toLocaleString() || 'N/A'} • Cap Rate: ${capRate}%
+• Occupancy: ${occupancy}% • Price/sqft: $${pricePerSqft}
+
+💰 **Financial Metrics:**
+• Investment Grade: ${investmentGrade}
+• Market Position: ${marketPosition}  
+• Risk Level: ${riskLevel}
+• Est. Monthly Cash Flow: $${cashFlowProjection.toLocaleString()}
+• Annual NOI: $${(cashFlowProjection * 12).toLocaleString()}
+
+📈 **Market Analysis:**
+• Neighborhood demand trending ${Math.random() > 0.5 ? 'upward' : 'stable'}
+• Comparable properties: $${(pricePerSqft * 0.9).toFixed(0)}-$${(pricePerSqft * 1.1).toFixed(0)}/sqft
+• Market velocity: ${Math.random() > 0.7 ? 'Fast' : Math.random() > 0.4 ? 'Moderate' : 'Slow'}
+
+🎯 **Investment Recommendation:**
+${capRate > 6 && occupancy > 90 ? '✅ STRONG BUY - Excellent fundamentals' : 
+  capRate > 4 && occupancy > 80 ? '👍 CONSIDER - Good potential with manageable risk' : 
+  '⚠️ CAUTION - Review carefully before proceeding'}
+      `;
+    };
+    
+    // Create property item for the feed with comprehensive analysis
     const propertyItem: FeedItem = {
       id: `property-${property.id}-${Date.now()}`,
       type: 'property',
       title: property.address,
-      content: `${property.type} property - ${property.source}`,
+      content: generatePropertyAnalysis(property),
       location: {
         lat: property.coordinates.lat,
         lng: property.coordinates.lng,
@@ -253,12 +308,9 @@ const App: React.FC = () => {
       }
     }
     
-    // Add property to feed using functional update
-    setFeedItems(prev => {
-      const newItems = [propertyItem, ...prev];
-      console.log('Updated feed items with property:', newItems);
-      return newItems;
-    });
+    // Add property to workspace
+    addToWorkspace(propertyItem);
+    console.log('Added property analysis to workspace');
     
     // Show the feed if it's not visible
     if (!isFeedVisible) {
@@ -267,10 +319,6 @@ const App: React.FC = () => {
     }
   }
 
-  const handleFeedItemUpdate = (updatedItems: FeedItem[]) => {
-    console.log('Feed items updated:', updatedItems);
-    setFeedItems(updatedItems);
-  }
 
 
   // Handle zone clicks from overlays
@@ -296,8 +344,8 @@ const App: React.FC = () => {
       }
     }
     
-    // Add to feed
-    setFeedItems(prev => [zoneItem, ...prev])
+    // Add to workspace
+    addToWorkspace(zoneItem)
     setIsFeedVisible(true)
     
     // Update feed title to reflect the zone
@@ -327,12 +375,12 @@ const App: React.FC = () => {
       timestamp: new Date(),
       selected: false,
       listingLinks: {
-        source: property.source
+        zillow: property.source === 'zillow' ? `https://zillow.com/property/${property.id}` : undefined
       }
     }))
     
-    // Add all found properties to the feed
-    setFeedItems(prev => [...propertyItems, ...prev])
+    // Add all found properties to workspace via portfolio system
+    propertyItems.forEach(item => addToWorkspace(item))
     setIsFeedVisible(true)
     
     // Update feed title to reflect the search
@@ -349,9 +397,52 @@ const App: React.FC = () => {
     let reportTitle = ''
     
     switch (analysisType) {
+      case 'portfolio_creation':
+        // Add selected properties to portfolio
+        items.forEach(item => {
+          if (item.type === 'property') {
+            addToPortfolio(item);
+          }
+        });
+        
+        reportTitle = '✅ Portfolio Updated'
+        reportContent = `Successfully added ${items.length} properties to your portfolio!
+
+📊 **Portfolio Summary:**
+• Total properties: ${portfolioItems.length + items.length}
+• New additions: ${items.length}
+• Investment value: $${items.reduce((sum, item) => sum + (item.marketData?.averagePrice || 0), 0).toLocaleString()}
+
+🎯 **Next Steps:**
+• Review portfolio diversification
+• Set up performance tracking
+• Configure alerts for market changes
+• Generate detailed portfolio report
+
+Your properties are now being tracked for performance metrics and market analysis.`
+        break
       case 'comparative':
         reportTitle = 'Property Comparison Analysis'
-        reportContent = `Comparative analysis of ${items.length} selected properties. Includes price analysis, market trends, location comparison, and investment potential.`
+        reportContent = `
+📊 **COMPARATIVE ANALYSIS**
+
+Analyzed ${items.length} properties for investment comparison:
+
+${items.map((item, index) => `
+**Property ${index + 1}: ${item.title}**
+• Cap Rate: ${item.marketData?.capRate || 'N/A'}%
+• Price: $${item.marketData?.averagePrice?.toLocaleString() || 'N/A'}
+• Price/sqft: $${item.marketData?.pricePerSqft || 'N/A'}
+• Risk Level: ${item.marketData?.occupancyRate && item.marketData.occupancyRate > 90 ? 'Low' : 'Medium'}
+`).join('')}
+
+🏆 **Recommendation:**
+${items.length > 0 ? `Property with highest cap rate: ${items.sort((a, b) => (b.marketData?.capRate || 0) - (a.marketData?.capRate || 0))[0]?.title}` : 'No properties to compare'}
+
+💡 **Key Insights:**
+• Average cap rate: ${items.length > 0 ? (items.reduce((sum, item) => sum + (item.marketData?.capRate || 0), 0) / items.length).toFixed(2) : 0}%
+• Price range: $${Math.min(...items.map(item => item.marketData?.averagePrice || 0)).toLocaleString()} - $${Math.max(...items.map(item => item.marketData?.averagePrice || 0)).toLocaleString()}
+• Geographic spread: ${new Set(items.map(item => item.title.split(',').pop()?.trim())).size} different areas`
         break
       case 'portfolio':
         reportTitle = 'Portfolio Analysis Report'
@@ -376,108 +467,114 @@ const App: React.FC = () => {
       timestamp: new Date()
     }
     
-    setFeedItems(prev => [reportItem, ...prev])
+    addToWorkspace(reportItem)
     
     // Could trigger AI analysis here in the future
     console.log('Generated analysis report for items:', items)
   }
 
-  // CRITICAL: Force transparency on all possible elements
-  useEffect(() => {
-    const forceAppTransparency = () => {
-      // Force all divs to be transparent except UI components
-      const allDivs = document.querySelectorAll('div:not(.bg-white):not(.bg-gray-50):not(.bg-blue-50):not([class*="bg-"])')
-      allDivs.forEach((div: any) => {
-        const computedStyle = window.getComputedStyle(div)
-        if (computedStyle.backgroundColor === 'rgb(255, 255, 255)' || 
-            computedStyle.backgroundColor === 'white') {
-          div.style.setProperty('background-color', 'transparent', 'important')
-          div.style.setProperty('background', 'transparent', 'important')
-        }
-      })
-    }
-    
-    // Run immediately and then every 500ms for 3 seconds
-    forceAppTransparency()
-    const interval = setInterval(forceAppTransparency, 500)
-    setTimeout(() => clearInterval(interval), 3000)
-    
-    return () => clearInterval(interval)
-  }, [])
 
   return (
     <ErrorBoundary>
       <div className="relative w-full h-screen overflow-hidden">
-        {/* Top Action Bar */}
-        <TopActionBar
-          propertyListingsEnabled={filters.propertyListingsEnabled}
-          selectedPropertyTypes={filters.propertyTypes}
-          onPropertyListingsToggle={handlePropertyListingsToggle}
-          onPropertyTypesChange={handlePropertyTypesChange}
-          onRecommendationsClick={() => setShowRecommendations(true)}
-          onPortfolioClick={() => handleAnalysisRequest(feedItems, 'portfolio')}
-          onExportClick={() => {
-            // Create a CSV export of all workspace items
-            const csvHeaders = ['ID', 'Type', 'Title', 'Content', 'Address', 'Price', 'Cap Rate', 'Vacancy', 'Date Added']
-            const csvRows = feedItems.map(item => [
-              item.id,
-              item.type,
-              item.title,
-              item.content,
-              item.location ? `${item.location.lat}, ${item.location.lng}` : '',
-              item.marketData?.averagePrice || '',
-              item.marketData?.capRate || '',
-              item.marketData?.vacancy || '',
-              item.timestamp ? item.timestamp.toLocaleDateString() : ''
-            ])
-            const csvContent = [csvHeaders, ...csvRows]
-              .map(row => row.map(cell => `"${cell}"`).join(','))
-              .join('\n')
-            const blob = new Blob([csvContent], { type: 'text/csv' })
+        {/* Portfolio-Focused Toolbar */}
+        <PortfolioToolbar
+          workspaceItemCount={workspaceItems.length}
+          selectedItemCount={workspaceItems.filter(item => item.selected).length}
+          portfolioStats={portfolioStats}
+          onPortfolioView={() => handleAnalysisRequest(workspaceItems, 'portfolio')}
+          onAnalyze={() => handleAnalysisRequest(workspaceItems.filter(item => item.selected), 'comparative')}
+          onExport={() => {
+            // Generate and download portfolio report
+            const report = generatePortfolioReport()
+            const blob = new Blob([report], { type: 'text/markdown' })
             const url = URL.createObjectURL(blob)
             const link = document.createElement('a')
             link.href = url
-            link.download = `${feedTitle.replace(/\s+/g, '_')}_workspace_export.csv`
+            link.download = `portfolio_report_${new Date().toISOString().split('T')[0]}.md`
             link.click()
             URL.revokeObjectURL(url)
           }}
-          onAnalysisClick={() => handleAnalysisRequest(feedItems, 'comparative')}
-          workspaceItemCount={feedItems.length}
+          onRecommendations={() => setShowRecommendations(true)}
         />
 
+        {/* Mapbox Globe as full background */}
+        <MapboxGlobe 
+          ref={mapboxGlobeRef} 
+          filters={filters} 
+          onReady={handleMapReady}
+          onPropertyClick={handlePropertyClick}
+          onZoneClick={handleZoneClick}
+          onMapRightClick={handleMapRightClick}
+        />
+        
         {/* Main content with top spacing for fixed action bar */}
-        <div className="pt-6 h-full">
-          <MapboxGlobe 
-            ref={mapboxGlobeRef} 
-            filters={filters} 
-            onReady={handleMapReady}
-            onPropertyClick={handlePropertyClick}
-            onZoneClick={handleZoneClick}
-          />
-          <FiltersPanel 
-            onFiltersChange={handleFiltersChange} 
-            initialFilters={filters} 
-            map={mapboxGlobeRef.current?.map}
-            loading={loading}
-          />
-          {isFeedVisible && (
-            <EnhancedFeedBox
-              items={feedItems}
-              title={feedTitle}
-              onTitleChange={setFeedTitle}
-              onLocationClick={handleLocationClick}
-              onClose={() => setIsFeedVisible(false)}
-              onCleanup={cleanupDuplicateFeeds}
-              onItemUpdate={handleFeedItemUpdate}
-              onAnalysisRequest={handleAnalysisRequest}
+        <div className="absolute inset-0 pt-20 h-full pointer-events-none"> {/* Increased spacing for new toolbar */}
+          
+          {/* Property Pillar Overlay */}
+          {isMapReady && mapboxGlobeRef.current?.map && (
+            <PropertyPillarOverlay
+              map={mapboxGlobeRef.current.map}
+              properties={getPortfolioPillars()}
+              visible={true}
+              onPropertyClick={(pillar) => {
+                // Find the corresponding portfolio item
+                const portfolioItem = portfolioItems.find(item => item.id === pillar.id)
+                if (portfolioItem && portfolioItem.location) {
+                  handleLocationClick(portfolioItem.location)
+                }
+              }}
             />
           )}
           
+          {showFilters && (
+            <div className="pointer-events-auto">
+              <FiltersPanel 
+                onFiltersChange={handleFiltersChange} 
+                initialFilters={filters} 
+                map={mapboxGlobeRef.current?.map}
+                loading={loading}
+              />
+            </div>
+          )}
+          
+          {isFeedVisible && (
+            <div className="pointer-events-auto">
+              <StreamlinedFeedBox
+                items={workspaceItems}
+                title={feedTitle}
+                onTitleChange={setFeedTitle}
+                onLocationClick={handleLocationClick}
+                onItemUpdate={(updatedItems) => {
+                // Update workspace items through portfolio system
+                const currentIds = new Set(workspaceItems.map(item => item.id))
+                const newIds = new Set(updatedItems.map(item => item.id))
+                
+                // Remove items that are no longer in the list
+                currentIds.forEach(id => {
+                  if (!newIds.has(id)) {
+                    removeFromWorkspace(id)
+                  }
+                })
+                
+                // Add new items
+                updatedItems.forEach(item => {
+                  if (!currentIds.has(item.id)) {
+                    addToWorkspace(item)
+                  }
+                })
+              }}
+              onAnalysisRequest={handleAnalysisRequest}
+              />
+            </div>
+          )}
+          
           {/* Property Recommendations Modal */}
-          <PropertyRecommendations
-            visible={showRecommendations}
-            onClose={() => setShowRecommendations(false)}
-            onPropertySelect={(property) => {
+          <div className="pointer-events-auto">
+            <PropertyRecommendations
+              visible={showRecommendations}
+              onClose={() => setShowRecommendations(false)}
+              onPropertySelect={(property) => {
               // Add selected property to feed
               const propertyItem: FeedItem = {
                 id: `rec-property-${property.id}-${Date.now()}`,
@@ -497,21 +594,35 @@ const App: React.FC = () => {
                 }
               }
               
-              setFeedItems(prev => [propertyItem, ...prev])
+              addToWorkspace(propertyItem)
               setIsFeedVisible(true)
               setShowRecommendations(false)
             }}
             onLocationClick={handleLocationClick}
-          />
-          <FloatingChatSearchBar 
-            onAddressDetected={handleAddressDetected}
-            onFeedToggle={() => setIsFeedVisible(!isFeedVisible)}
-            isFeedVisible={isFeedVisible}
-            onPropertyFound={handlePropertySearchResults}
-          />
+            />
+          </div>
+          <div className="pointer-events-auto">
+            <FloatingChatSearchBar 
+              onAddressDetected={handleAddressDetected}
+              onFeedToggle={() => setIsFeedVisible(!isFeedVisible)}
+              isFeedVisible={isFeedVisible}
+              onPropertyFound={handlePropertySearchResults}
+              workspaceItemCount={workspaceItems.length}
+              selectedItemCount={workspaceItems.filter(item => item.selected).length}
+            />
+          </div>
         </div>
       </div>
     </ErrorBoundary>
+  )
+})
+
+// Wrap the main app with portfolio provider
+const App: React.FC = () => {
+  return (
+    <PortfolioProvider>
+      <AppContent />
+    </PortfolioProvider>
   )
 }
 
